@@ -38,14 +38,14 @@ def analyze_file(file, question: str):
             temp_file_path = temp_file.name
 
         # Upload the temporary file to OpenAI
-        file_obj = openai.File.create(file=open(temp_file_path, "rb"), purpose="assistants")
+        file_obj = openai.File.create(file=open(temp_file_path, "rb"), purpose="answers")
 
         assistant = openai.Assistant.create(
             name="Data Analyst Assistant",
             instructions="You are a personal Data Analyst Assistant.",
             model="gpt-4o",
             tools=[{"type": "code_interpreter"}],
-            tool_resources={"code_interpreter": {"file_ids": [file_obj["id"]}}}
+            tool_resources={"code_interpreter": {"file_ids": [file_obj["id"]]}}
         )
 
         # Create a thread
@@ -77,8 +77,8 @@ st.title("AI Research & Data Insights Assistant")
 
 # Sidebar for OpenAI API Key
 st.sidebar.title("Settings")
-api_key_submit = st.sidebar.button("Submit API Key")
 openai_api_key = st.sidebar.text_input("Enter your OpenAI API Key:", type="password")
+api_key_submit = st.sidebar.button("Submit API Key")
 
 if api_key_submit:
     if openai_api_key:
