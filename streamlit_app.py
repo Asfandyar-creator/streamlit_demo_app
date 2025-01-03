@@ -5,9 +5,6 @@ import openai
 from langchain_community.utilities import WikipediaAPIWrapper
 from langchain_community.tools import WikipediaQueryRun
 
-# Set your OpenAI API key
-openai.api_key = "your_openai_api_key_here"
-
 # Initialize Wikipedia tool
 wiki_wrapper = WikipediaAPIWrapper(top_k_results=1, doc_content_chars_max=700)
 wiki_tool = WikipediaQueryRun(api_wrapper=wiki_wrapper)
@@ -39,9 +36,9 @@ def analyze_file(file, question: str):
         assistant = openai.Assistant.create(
             name="Data Analyst Assistant",
             instructions="You are a personal Data Analyst Assistant.",
-            model="gpt-4-1106-preview",
+            model="gpt-4o",
             tools=[{"type": "code_interpreter"}],
-            tool_resources={"code_interpreter": {"file_ids": [file_obj["id"]]}}
+            tool_resources={"code_interpreter": {"file_ids": [file_obj["id"]]}},
         )
         
         # Create a thread
@@ -51,7 +48,7 @@ def analyze_file(file, question: str):
         run = openai.Thread.Run.create(
             thread_id=thread["id"],
             assistant_id=assistant["id"],
-            instructions=question
+            instructions=question,
         )
         
         # Wait for completion
@@ -71,7 +68,15 @@ def analyze_file(file, question: str):
 # Streamlit app
 st.title("AI Research & Data Insights Assistant")
 
-st.sidebar.title("Choose an Option")
+# Sidebar for OpenAI API Key
+st.sidebar.title("Settings")
+openai_api_key = st.sidebar.text_input("Enter your OpenAI API Key:", type="password")
+if openai_api_key:
+    openai.api_key = openai_api_key
+else:
+    st.sidebar.warning("Please provide your OpenAI API key to proceed.")
+
+# Sidebar interaction options
 option = st.sidebar.radio(
     "How would you like to interact?",
     ("Wikipedia Research", "Upload File for Data Insights")
@@ -81,12 +86,15 @@ if option == "Wikipedia Research":
     st.header("Wikipedia Research")
     user_query = st.text_input("Enter your query:")
     if st.button("Search"):
-        if user_query.strip():
-            result = wiki_tool.run(user_query)
-            st.success("Result:")
-            st.write(result)
+        if openai_api_key:
+            if user_query.strip():
+                result = wiki_tool.run(user_query)
+                st.success("Result:")
+                st.write(result)
+            else:
+                st.warning("Please enter a query.")
         else:
-            st.warning("Please enter a query.")
+            st.error("API key is missing. Please enter it in the sidebar.")
 
 elif option == "Upload File for Data Insights":
     st.header("Upload File for Data Insights")
@@ -96,9 +104,12 @@ elif option == "Upload File for Data Insights":
     )
     question = st.text_input("Ask a question about your dataset:")
     if st.button("Analyze"):
-        if uploaded_file and question.strip():
-            result = analyze_file(uploaded_file, question)
-            st.success("Insight:")
-            st.write(result)
+        if openai_api_key:
+            if uploaded_file and question.strip():
+                result = analyze_file(uploaded_file, question)
+                st.success("Insight:")
+                st.write(result)
+            else:
+                st.warning("Please upload a file and enter a question.")
         else:
-            st.warning("Please upload a file and enter a question.")
+            st.error("API key is missing. Please enter it in the sidebar.")
