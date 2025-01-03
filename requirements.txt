@@ -1,4 +1,4 @@
-streamit
+streamlit
 pandas
 openai
 langchain
