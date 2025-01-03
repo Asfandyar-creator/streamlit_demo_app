@@ -38,7 +38,7 @@ def analyze_file(file, question: str):
             temp_file_path = temp_file.name
 
         # Upload the temporary file to OpenAI
-        file_obj = openai.File.create(file=open(temp_file_path, "rb"), purpose="answers")
+        file_obj = openai.File.create(file=open(temp_file_path, "rb"), purpose="assistants")
 
         assistant = openai.Assistant.create(
             name="Data Analyst Assistant",
