@@ -1,0 +1,5 @@
+streamit
+pandas
+openai
+langchain
+langchain-community
