@@ -62,47 +62,53 @@ class AssistantManager:
             thread_id=self.thread_id
         )
         
-        # Get the latest assistant message
         for message in messages:
             if message.role == "assistant":
                 return message.content[0].text.value
         
         return "No response received"
 
+def initialize_session_state():
+    if 'api_key' not in st.session_state:
+        st.session_state['api_key'] = ''
+    if 'assistant_manager' not in st.session_state:
+        st.session_state['assistant_manager'] = None
+
 def main():
     st.title("OpenAI Assistant Interface")
+    initialize_session_state()
     
-    # Sidebar for API key
     with st.sidebar:
         st.header("Configuration")
         api_key = st.text_input("OpenAI API Key", type="password")
         if st.button("Submit API Key"):
-            st.session_state['api_key'] = api_key
-            st.success("API key saved!")
+            if api_key:
+                st.session_state['api_key'] = api_key
+                try:
+                    st.session_state['assistant_manager'] = AssistantManager(api_key)
+                    st.session_state['assistant_manager'].setup_assistant()
+                    st.success("API key saved and assistant initialized!")
+                except Exception as e:
+                    st.error(f"Error initializing assistant: {str(e)}")
+            else:
+                st.error("Please enter an API key")
     
-    if 'assistant_manager' not in st.session_state and 'api_key' in st.session_state:
-        st.session_state['assistant_manager'] = AssistantManager(st.session_state['api_key'])
-        st.session_state['assistant_manager'].setup_assistant()
-        st.success("Assistant initialized!")
-    
-    # File uploader
+    if st.session_state['assistant_manager'] is None:
+        st.warning("Please configure your API key in the sidebar")
+        return
+        
     uploaded_file = st.file_uploader("Upload a CSV file", type=['csv'])
-    if uploaded_file and 'assistant_manager' in st.session_state:
-        # Save uploaded file temporarily
+    if uploaded_file:
         with open("temp.csv", "wb") as f:
             f.write(uploaded_file.getvalue())
         st.session_state['assistant_manager'].setup_assistant("temp.csv")
         st.success("File uploaded and assistant updated!")
     
-    # Query input
     query = st.text_area("Enter your query:")
     if st.button("Submit Query"):
-        if 'assistant_manager' not in st.session_state:
-            st.error("Please submit an API key first")
-        else:
-            with st.spinner("Processing query..."):
-                response = st.session_state['assistant_manager'].process_query(query)
-                st.write("Response:", response)
+        with st.spinner("Processing query..."):
+            response = st.session_state['assistant_manager'].process_query(query)
+            st.write("Response:", response)
 
 if __name__ == "__main__":
     main()
