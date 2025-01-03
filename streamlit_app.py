@@ -1,12 +1,12 @@
+from openai import OpenAI
 import streamlit as st
-import openai
 import time
 import pandas as pd
 from typing import Optional
 
 class AssistantManager:
     def __init__(self, api_key: str):
-        self.client = openai.OpenAI(api_key=api_key)
+        self.client = OpenAI(api_key=api_key)
         self.assistant_id = None
         self.thread_id = None
         
