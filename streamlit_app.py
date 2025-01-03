@@ -1,115 +1,107 @@
-import openai
 import streamlit as st
+import openai
 import time
-import pandas as pd
-from typing import Optional
 
-class AssistantManager:
-    def __init__(self, api_key: str):
-        openai.api_key = api_key
-        self.assistant_id = None
-        self.thread_id = None
+def create_assistant(api_key, file_path):
+    client = openai.OpenAI(api_key=api_key)
+    
+    # Upload file
+    file = client.files.create(
+        file=open(file_path, "rb"),
+        purpose='assistants'
+    )
+    
+    # Create assistant
+    assistant = client.beta.assistants.create(
+        name="Data Analyst Assistant",
+        instructions="You are a personal Data Analyst Assistant",
+        model="gpt-4-1106-preview",
+        tools=[{"type": "code_interpreter"}],
+        tool_resources={'code_interpreter': {'file_ids': [file.id]}}
+    )
+    
+    return client, assistant, file
 
-    def setup_assistant(self, file_path: Optional[str] = None) -> None:
-        file_id = None
-        if file_path:
-            with open(file_path, "rb") as file:
-                response = openai.File.create(
-                    file=file,
-                    purpose='answers'
-                )
-                file_id = response['id']
-
-        response = openai.Assistant.create(
-            name="Data Analyst Assistant",
-            instructions="You are a personal Data Analyst Assistant",
-            model="gpt-4-1106-preview",
-            tools=[{"type": "code_interpreter"}],
-            tool_resources={'code_interpreter': {'file_ids': [file_id]}} if file_id else None
-        )
-        self.assistant_id = response['id']
-
-        response = openai.Thread.create()
-        self.thread_id = response['id']
-
-    def process_query(self, query: str) -> str:
-        if not self.assistant_id or not self.thread_id:
-            return "Assistant not initialized. Please set up the assistant first."
-
-        response = openai.ThreadMessage.create(
-            thread_id=self.thread_id,
-            role="user",
-            content=query
-        )
-
-        response = openai.ThreadRun.create(
-            thread_id=self.thread_id,
-            assistant_id=self.assistant_id,
-            instructions=query
-        )
-
+def process_query(client, thread_id, assistant_id, query):
+    # Add message to thread
+    message = client.beta.threads.messages.create(
+        thread_id=thread_id,
+        role="user",
+        content=query,
+    )
+    
+    # Run assistant
+    run = client.beta.threads.runs.create(
+        thread_id=thread_id,
+        assistant_id=assistant_id,
+        instructions=query,
+    )
+    
+    # Wait for completion
+    with st.spinner('Processing...'):
         while True:
-            time.sleep(1)
-            run_status = openai.ThreadRun.retrieve(
-                thread_id=self.thread_id,
-                run_id=response['id']
+            time.sleep(2)
+            run_status = client.beta.threads.runs.retrieve(
+                thread_id=thread_id,
+                run_id=run.id
             )
-            if run_status['status'] == 'completed':
+            if run_status.status == 'completed':
                 break
-            elif run_status['status'] in ['failed', 'cancelled', 'expired']:
-                return f"Error: Run ended with status {run_status['status']}"
-
-        messages = openai.ThreadMessage.list(
-            thread_id=self.thread_id
-        )
-
-        for message in messages:
-            if message['role'] == "assistant":
-                return message['content']
-
-        return "No response received"
-
-def initialize_session_state():
-    if 'api_key' not in st.session_state:
-        st.session_state['api_key'] = ''
-    if 'assistant_manager' not in st.session_state:
-        st.session_state['assistant_manager'] = None
+            elif run_status.status in ['failed', 'cancelled', 'expired']:
+                st.error(f"Run failed with status: {run_status.status}")
+                return None
+    
+    # Get messages
+    messages = client.beta.threads.messages.list(thread_id=thread_id)
+    return messages
 
 def main():
-    st.title("OpenAI Assistant Interface")
-    initialize_session_state()
-
+    st.title("Data Analysis Assistant")
+    
+    # Sidebar for API key
     with st.sidebar:
         st.header("Configuration")
         api_key = st.text_input("OpenAI API Key", type="password")
-        if st.button("Submit API Key"):
-            if api_key:
-                st.session_state['api_key'] = api_key
-                try:
-                    st.session_state['assistant_manager'] = AssistantManager(api_key)
-                    st.session_state['assistant_manager'].setup_assistant()
-                    st.success("API key saved and assistant initialized!")
-                except Exception as e:
-                    st.error(f"Error initializing assistant: {str(e)}")
-            else:
-                st.error("Please enter an API key")
-
-    if st.session_state['assistant_manager'] is None:
-        st.warning("Please configure your API key in the sidebar")
-        return
-
-    uploaded_file = st.file_uploader("Upload a CSV file", type=['csv'])
-    if uploaded_file:
-        # Read the file into a DataFrame
-        df = pd.read_csv(uploaded_file)
-        st.write(df)
-        # Process the DataFrame as needed
-
-    query = st.text_area("Enter your query:")
-    if st.button("Submit Query"):
-        with st.spinner("Processing query..."):
-            response = st.session_state['assistant_manager'].process_query(query)
-            st.write("Response:", response)
+        submit_key = st.button("Submit API Key")
+    
+    # Initialize session state
+    if 'client' not in st.session_state:
+        st.session_state.client = None
+        st.session_state.assistant = None
+        st.session_state.thread = None
+    
+    # Set up assistant when API key is submitted
+    if submit_key and api_key:
+        try:
+            client, assistant, file = create_assistant(api_key, "Titanic-Dataset.csv")
+            thread = client.beta.threads.create()
+            st.session_state.client = client
+            st.session_state.assistant = assistant
+            st.session_state.thread = thread
+            st.success("Assistant configured successfully!")
+        except Exception as e:
+            st.error(f"Error setting up assistant: {str(e)}")
+    
+    # Main interface
+    if st.session_state.client:
+        query = st.text_input("Enter your query about the dataset:")
+        if st.button("Submit Query"):
+            if query:
+                messages = process_query(
+                    st.session_state.client,
+                    st.session_state.thread.id,
+                    st.session_state.assistant.id,
+                    query
+                )
+                
+                if messages:
+                    st.subheader("Results")
+                    for message in reversed(list(messages)):
+                        with st.container():
+                            st.write(f"**{message.role.title()}**:")
+                            for content in message.content:
+                                if content.type == 'text':
+                                    st.write(content.text.value)
 
 if __name__ == "__main__":
     main()
