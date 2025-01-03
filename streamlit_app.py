@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import tempfile
-from typing import List
 import openai
 from langchain_community.utilities import WikipediaAPIWrapper
 from langchain_community.tools import WikipediaQueryRun
@@ -14,11 +13,11 @@ wiki_tool = WikipediaQueryRun(api_wrapper=wiki_wrapper)
 def analyze_file(file, question: str):
     """
     Analyze a file and respond to a user's question.
-    
+
     Args:
         file: Uploaded file (CSV/XLS/XLSX).
         question: User's query about the data.
-    
+
     Returns:
         Insights or analysis from the data.
     """
@@ -31,44 +30,18 @@ def analyze_file(file, question: str):
         else:
             return "Unsupported file format. Please upload a CSV or Excel file."
 
-        # Save the file temporarily with the correct MIME type
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file.name.split('.')[-1]}") as temp_file:
-            file.seek(0)  # Reset file pointer
-            temp_file.write(file.read())
-            temp_file_path = temp_file.name
+        # Convert the DataFrame to a string for model input
+        data_preview = df.head().to_string()  # Use only the first few rows for brevity
 
-        # Upload the temporary file to OpenAI
-        file_obj = openai.File.create(file=open(temp_file_path, "rb"), purpose="assistants")
-
-        assistant = openai.Assistant.create(
-            name="Data Analyst Assistant",
-            instructions="You are a personal Data Analyst Assistant.",
-            model="gpt-4o",
-            tools=[{"type": "code_interpreter"}],
-            tool_resources={"code_interpreter": {"file_ids": [file_obj["id"]]}}
+        # Generate response using OpenAI ChatCompletion
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a data analyst assistant."},
+                {"role": "user", "content": f"Here is a preview of the data:\n{data_preview}\n\nQuestion: {question}"}
+            ]
         )
-
-        # Create a thread
-        thread = openai.Thread.create()
-
-        # Run assistant
-        run = openai.Thread.Run.create(
-            thread_id=thread["id"],
-            assistant_id=assistant["id"],
-            instructions=question,
-        )
-
-        # Wait for completion
-        while True:
-            status = openai.Thread.Run.retrieve(
-                thread_id=thread["id"],
-                run_id=run["id"]
-            )
-            if status["status"] == "completed":
-                messages = openai.Thread.Message.list(thread_id=thread["id"])
-                return messages[-1]["content"]["text"]
-            elif status["status"] in ["failed", "cancelled", "expired"]:
-                return f"Error: {status['status']}"
+        return response['choices'][0]['message']['content']
     except Exception as e:
         return f"Error processing file: {str(e)}"
 
@@ -77,8 +50,8 @@ st.title("AI Research & Data Insights Assistant")
 
 # Sidebar for OpenAI API Key
 st.sidebar.title("Settings")
-openai_api_key = st.sidebar.text_input("Enter your OpenAI API Key:", type="password")
 api_key_submit = st.sidebar.button("Submit API Key")
+openai_api_key = st.sidebar.text_input("Enter your OpenAI API Key:", type="password")
 
 if api_key_submit:
     if openai_api_key:
