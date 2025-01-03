@@ -1,125 +1,108 @@
 import streamlit as st
-import pandas as pd
 import openai
 import time
-from langchain_community.utilities import WikipediaAPIWrapper
-from langchain_community.tools import WikipediaQueryRun
+import pandas as pd
+from typing import Optional
 
-# Initialize Wikipedia tools
-wiki_wrapper = WikipediaAPIWrapper(top_k_results=1, doc_content_chars_max=300)
-wiki_tool = WikipediaQueryRun(api_wrapper=wiki_wrapper)
+class AssistantManager:
+    def __init__(self, api_key: str):
+        self.client = openai.OpenAI(api_key=api_key)
+        self.assistant_id = None
+        self.thread_id = None
+        
+    def setup_assistant(self, file_path: Optional[str] = None) -> None:
+        file_id = None
+        if file_path:
+            file = self.client.files.create(
+                file=open(file_path, "rb"),
+                purpose='assistants'
+            )
+            file_id = file.id
+            
+        assistant = self.client.beta.assistants.create(
+            name="Data Analyst Assistant",
+            instructions="You are a personal Data Analyst Assistant",
+            model="gpt-4-1106-preview",
+            tools=[{"type": "code_interpreter"}],
+            tool_resources={'code_interpreter': {'file_ids': [file_id]}} if file_id else None
+        )
+        self.assistant_id = assistant.id
+        
+        thread = self.client.beta.threads.create()
+        self.thread_id = thread.id
 
-# Streamlit app
-st.title("AI Data Analyst Assistant")
+    def process_query(self, query: str) -> str:
+        if not self.assistant_id or not self.thread_id:
+            return "Assistant not initialized. Please set up the assistant first."
+            
+        message = self.client.beta.threads.messages.create(
+            thread_id=self.thread_id,
+            role="user",
+            content=query
+        )
+        
+        run = self.client.beta.threads.runs.create(
+            thread_id=self.thread_id,
+            assistant_id=self.assistant_id,
+            instructions=query
+        )
+        
+        while True:
+            time.sleep(1)
+            run_status = self.client.beta.threads.runs.retrieve(
+                thread_id=self.thread_id,
+                run_id=run.id
+            )
+            if run_status.status == 'completed':
+                break
+            elif run_status.status in ['failed', 'cancelled', 'expired']:
+                return f"Error: Run ended with status {run_status.status}"
+        
+        messages = self.client.beta.threads.messages.list(
+            thread_id=self.thread_id
+        )
+        
+        # Get the latest assistant message
+        for message in messages:
+            if message.role == "assistant":
+                return message.content[0].text.value
+        
+        return "No response received"
 
-# Sidebar settings
-st.sidebar.title("Settings")
-openai_api_key = st.sidebar.text_input("Enter your OpenAI API Key:", type="password")
-api_key_submit = st.sidebar.button("Submit API Key")
-
-if api_key_submit:
-    if openai_api_key:
-        client = openai.OpenAI(api_key=openai_api_key)
-        st.sidebar.success("API Key submitted successfully!")
-    else:
-        st.sidebar.error("Please provide your OpenAI API key.")
-
-# Task selection
-option = st.sidebar.radio(
-    "Choose a task:",
-    ("Upload Dataset for Analysis", "Wikipedia Search")
-)
-
-if option == "Upload Dataset for Analysis":
-    st.header("Dataset Analysis Assistant")
-    uploaded_file = st.file_uploader("Upload your CSV file:", type=["csv"])
-    question = st.text_input("Ask a question about your dataset:")
+def main():
+    st.title("OpenAI Assistant Interface")
     
-    if st.button("Analyze"):
-        if openai_api_key and uploaded_file and question.strip():
-            try:
-                # Create file for assistant
-                file = client.files.create(
-                    file=uploaded_file,
-                    purpose='assistants'
-                )
-
-                # Create assistant
-                assistant = client.beta.assistants.create(
-                    name="Data Analyst Assistant",
-                    instructions="You are a personal Data Analyst Assistant",
-                    model="gpt-4-1106-preview",
-                    tools=[{"type": "code_interpreter"}],
-                    tool_resources={'code_interpreter': {'file_ids': [file.id]}}
-                )
-
-                # Create thread and add message
-                thread = client.beta.threads.create()
-                message = client.beta.threads.messages.create(
-                    thread_id=thread.id,
-                    role="user",
-                    content=question
-                )
-
-                # Run assistant
-                run = client.beta.threads.runs.create(
-                    thread_id=thread.id,
-                    assistant_id=assistant.id,
-                    instructions=question
-                )
-
-                # Progress bar
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-
-                while True:
-                    run_status = client.beta.threads.runs.retrieve(
-                        thread_id=thread.id,
-                        run_id=run.id
-                    )
-                    
-                    if run_status.status == 'completed':
-                        progress_bar.progress(100)
-                        status_text.success("Analysis complete!")
-                        break
-                    elif run_status.status in ['failed', 'cancelled', 'expired']:
-                        status_text.error(f"Analysis failed: {run_status.status}")
-                        break
-                    else:
-                        progress_bar.progress(50)
-                        status_text.info("Analyzing...")
-                        time.sleep(2)
-
-                if run_status.status == 'completed':
-                    messages = client.beta.threads.messages.list(thread_id=thread.id)
-                    
-                    for message in reversed(list(messages)):
-                        if message.role == "assistant":
-                            for content in message.content:
-                                if content.type == 'text':
-                                    st.write(content.text.value)
-
-                # Cleanup
-                client.beta.assistants.delete(assistant.id)
-                client.files.delete(file.id)
-
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
-        else:
-            st.warning("Please ensure API key is submitted and file is uploaded.")
-
-elif option == "Wikipedia Search":
-    st.header("Wikipedia Search")
-    search_query = st.text_input("Enter your search query:")
+    # Sidebar for API key
+    with st.sidebar:
+        st.header("Configuration")
+        api_key = st.text_input("OpenAI API Key", type="password")
+        if st.button("Submit API Key"):
+            st.session_state['api_key'] = api_key
+            st.success("API key saved!")
     
-    if st.button("Search"):
-        if search_query:
-            try:
-                with st.spinner("Searching Wikipedia..."):
-                    result = wiki_tool.run(search_query)
-                    st.write("Search Results:")
-                    st.write(result)
-            except Exception as e:
-                st.error(f"Error during search: {str(e)}")
+    if 'assistant_manager' not in st.session_state and 'api_key' in st.session_state:
+        st.session_state['assistant_manager'] = AssistantManager(st.session_state['api_key'])
+        st.session_state['assistant_manager'].setup_assistant()
+        st.success("Assistant initialized!")
+    
+    # File uploader
+    uploaded_file = st.file_uploader("Upload a CSV file", type=['csv'])
+    if uploaded_file and 'assistant_manager' in st.session_state:
+        # Save uploaded file temporarily
+        with open("temp.csv", "wb") as f:
+            f.write(uploaded_file.getvalue())
+        st.session_state['assistant_manager'].setup_assistant("temp.csv")
+        st.success("File uploaded and assistant updated!")
+    
+    # Query input
+    query = st.text_area("Enter your query:")
+    if st.button("Submit Query"):
+        if 'assistant_manager' not in st.session_state:
+            st.error("Please submit an API key first")
         else:
-            st.warning("Please enter a search query.")
+            with st.spinner("Processing query..."):
+                response = st.session_state['assistant_manager'].process_query(query)
+                st.write("Response:", response)
+
+if __name__ == "__main__":
+    main()
