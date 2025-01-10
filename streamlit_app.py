@@ -33,11 +33,11 @@ def process_pdfs(pdf_file):
             raise ValueError("No text chunks created")
 
         # Create embeddings
-        embeddings = OpenAIEmbeddings(openai_api_key='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')
+        embeddings = OpenAIEmbeddings(api_key='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')
         vectorstore = FAISS.from_documents(texts, embeddings)
 
         # Initialize QA chain
-        llm = ChatOpenAI(model_name="gpt-4o", temperature=0,openai_api_key='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')
+        llm = ChatOpenAI(model_name="gpt-4o", temperature=0, api_key='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')
         qa_chain = RetrievalQA.from_chain_type(
             llm=llm,
             chain_type="stuff",
