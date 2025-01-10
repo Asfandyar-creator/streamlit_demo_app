@@ -1,6 +1,5 @@
 streamlit
 pandas
-openai==0.28
 langchain
 langchain-community
 wikipedia
