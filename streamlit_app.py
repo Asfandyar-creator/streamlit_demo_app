@@ -1,107 +1,74 @@
 import streamlit as st
-import openai
-import time
+from langchain.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_openai.embeddings import OpenAIEmbeddings
+from langchain.vectorstores import FAISS
+from langchain_openai import ChatOpenAI
+from langchain.chains import RetrievalQA
+import os
 
-def create_assistant(api_key, file_path):
-    client = openai.OpenAI(api_key=api_key)
-    
-    # Upload file
-    file = client.files.create(
-        file=open(file_path, "rb"),
-        purpose='assistants'
-    )
-    
-    # Create assistant
-    assistant = client.beta.assistants.create(
-        name="Data Analyst Assistant",
-        instructions="You are a personal Data Analyst Assistant",
-        model="gpt-4-1106-preview",
-        tools=[{"type": "code_interpreter"}],
-        tool_resources={'code_interpreter': {'file_ids': [file.id]}}
-    )
-    
-    return client, assistant, file
+# Function to process PDFs and extract business problems
+def process_pdfs(pdf_file):
+    try:
+        # Save uploaded PDF to a temporary file
+        temp_pdf_path = f"temp_{pdf_file.name}"
+        with open(temp_pdf_path, "wb") as temp_file:
+            temp_file.write(pdf_file.read())
 
-def process_query(client, thread_id, assistant_id, query):
-    # Add message to thread
-    message = client.beta.threads.messages.create(
-        thread_id=thread_id,
-        role="user",
-        content=query,
-    )
-    
-    # Run assistant
-    run = client.beta.threads.runs.create(
-        thread_id=thread_id,
-        assistant_id=assistant_id,
-        instructions=query,
-    )
-    
-    # Wait for completion
-    with st.spinner('Processing...'):
-        while True:
-            time.sleep(2)
-            run_status = client.beta.threads.runs.retrieve(
-                thread_id=thread_id,
-                run_id=run.id
-            )
-            if run_status.status == 'completed':
-                break
-            elif run_status.status in ['failed', 'cancelled', 'expired']:
-                st.error(f"Run failed with status: {run_status.status}")
-                return None
-    
-    # Get messages
-    messages = client.beta.threads.messages.list(thread_id=thread_id)
-    return messages
+        # Load PDF
+        loader = PyPDFLoader(temp_pdf_path)
+        documents = loader.load()
 
-def main():
-    st.title("Data Analysis Assistant")
-    
-    # Sidebar for API key
-    with st.sidebar:
-        st.header("Configuration")
-        api_key = st.text_input("OpenAI API Key", type="password")
-        submit_key = st.button("Submit API Key")
-    
-    # Initialize session state
-    if 'client' not in st.session_state:
-        st.session_state.client = None
-        st.session_state.assistant = None
-        st.session_state.thread = None
-    
-    # Set up assistant when API key is submitted
-    if submit_key and api_key:
-        try:
-            client, assistant, file = create_assistant(api_key, "Titanic-Dataset.csv")
-            thread = client.beta.threads.create()
-            st.session_state.client = client
-            st.session_state.assistant = assistant
-            st.session_state.thread = thread
-            st.success("Assistant configured successfully!")
-        except Exception as e:
-            st.error(f"Error setting up assistant: {str(e)}")
-    
-    # Main interface
-    if st.session_state.client:
-        query = st.text_input("Enter your query about the dataset:")
-        if st.button("Submit Query"):
-            if query:
-                messages = process_query(
-                    st.session_state.client,
-                    st.session_state.thread.id,
-                    st.session_state.assistant.id,
-                    query
-                )
-                
-                if messages:
-                    st.subheader("Results")
-                    for message in reversed(list(messages)):
-                        with st.container():
-                            st.write(f"**{message.role.title()}**:")
-                            for content in message.content:
-                                if content.type == 'text':
-                                    st.write(content.text.value)
+        if not documents:
+            raise ValueError("No content extracted from PDF")
 
-if __name__ == "__main__":
-    main()
+        # Split text
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=100
+        )
+        texts = text_splitter.split_documents(documents)
+
+        if not texts:
+            raise ValueError("No text chunks created")
+
+        # Create embeddings
+        embeddings = OpenAIEmbeddings()
+        vectorstore = FAISS.from_documents(texts, embeddings)
+
+        # Initialize QA chain
+        llm = ChatOpenAI(model_name="gpt-4o", temperature=0)
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=llm,
+            chain_type="stuff",
+            retriever=vectorstore.as_retriever()
+        )
+
+        query = "What are the main business problems described in these documents? Provide a clear and concise summary."
+        result = qa_chain.invoke(query)
+
+        # Remove temporary file
+        os.remove(temp_pdf_path)
+
+        return result
+
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+# Streamlit app
+st.title("PDF Business Problem Analyzer")
+st.write("Upload a PDF document to analyze and extract a summary of the main business problems described.")
+
+# File uploader
+uploaded_file = st.file_uploader("Upload PDF", type="pdf")
+
+if uploaded_file is not None:
+    st.write("Processing your PDF...")
+    result = process_pdfs(uploaded_file)
+
+    if "Error:" in result:
+        st.error(result)
+    else:
+        st.success("Analysis Complete!")
+        st.subheader("Identified Business Problems:")
+        st.write(result)
