@@ -1,7 +1,1 @@
-streamlit
-pandas
-langchain
-langchain-community
-wikipedia
-langchain-openai
-pypdf
+
